@@ -20,23 +20,24 @@ Connector {Pc, Pc_np, Pc_p}
 Connector {Ic_out, Ic_in}
 Connector {Xa, Xb, Xd}
 
-Resource {PCGen(0), Decoder, JumpDecoder, OperandLookup} 
+Resource {PCGen, Decoder, JumpDecoder} 
 Resource {Rename}
 Resource {Issue}
+Resource {OperandLookup}
 Resource {ALU, STORE, LOAD, CSR}
-Resource {MUL(4)}
+Resource {MUL1, MUL2, MUL3, MUL4}
 Resource {DIV(divider), DIVU(divider_u)}
 Resource {IPort_R(iCacheModel), DCache(dCacheModel), DPort_R, DPort_W}
 Resource {Commit}
 
 Microaction {
   uA_PcCorrect     (Pc_mp),
-  uA_PcPredict     (Pc_mp -> PCGen),
-  uA_PcPredict_br  (Pc_mp -> PCGen -> Pc_p),
-  uA_PcPredict_j   (Pc_mp -> PCGen -> Pc_p_j),
-  uA_PcPredict_jr  (Pc_mp -> PCGen -> Pc_p_jr),
+  uA_PcPredict     (Pc_pt),
+  uA_PcPredict_br  (PCGen -> Pc_p),
+  uA_PcPredict_j   (PCGen -> Pc_p_j),
+  uA_PcPredict_jr  (PCGen -> Pc_p_jr),
   uA_CacheBlock    (Ic_out),
-  uA_IFetch        (Pc_mp -> IPort_R -> Ic_in),
+  uA_IFetch        (IPort_R -> Ic_in),
 
   uA_Decode        (Decoder),
   uA_Rename        (Rename),
@@ -62,12 +63,15 @@ Microaction {
   uA_CSR           (CSR -> Xd),
   uA_STORE         (STORE),
   uA_LOAD          (LOAD),
-  uA_MUL           (MUL -> Xd),
+  uA_MUL1          (MUL1),
+  uA_MUL2          (MUL2),
+  uA_MUL3          (MUL3),
+  uA_MUL           (MUL4 -> Xd),
   uA_DIV           (DIV -> Xd),
   uA_DIVU          (DIVU -> Xd),
 
-  uA_DCache        (DCache),
-  uA_Memory_R      (DPort_R -> Xd),
+  uA_DCache        (DCache -> Xd),
+  uA_Memory_R      (DPort_R),
   uA_Memory_W      (DPort_W),
   
   uA_Commit        (Commit)
@@ -92,17 +96,20 @@ Stage {
 // EX Substages
 Stage {
     EX_substage_alu    [capacity:3] (uA_ALU_RegUpdate),
-    EX_substage_mul    [capacity:8] (uA_MUL),
+    EX_substage_mul_1  [capacity:2] (uA_MUL1),
+    EX_substage_mul_2  [capacity:2] (uA_MUL2),
+    EX_substage_mul_3  [capacity:2] (uA_MUL3),
+    EX_substage_mul_4  [capacity:2] (uA_MUL),
     EX_substage_branch [capacity:2] (uA_ALU_Branch, uA_ALU_Jr),
     EX_substage_csr_div             (uA_CSR, uA_DIVU, uA_DIV),
-    EX_substage_agu    [capacity:2] (uA_LOAD, uA_DCache, uA_Memory_R),
-    EX_substage_store  [capacity:2] (uA_STORE, uA_DCache, uA_Memory_W)
+    EX_substage_agu    [capacity:2] (uA_LOAD, uA_DCache),
+    EX_substage_store  [capacity:2] (uA_STORE)
 }
 
 // EX Subpipeline
 Pipeline {
     EX_subpipe_alu      (EX_substage_alu),
-    EX_subpipe_mul      (EX_substage_mul),
+    EX_subpipe_mul      (EX_substage_mul_1 -> EX_substage_mul_2 -> EX_substage_mul_3 -> EX_substage_mul_4),
     EX_subpipe_branch   (EX_substage_branch),
     EX_subpipe_csr_div  (EX_substage_csr_div),
     EX_subpipe_agu      (EX_substage_agu),
@@ -126,9 +133,9 @@ Pipeline {
 Stage {
   IF_stage  [capacity:4]  (uA_PcCorrect, uA_PcPredict, uA_PcPredict_br, uA_PcPredict_j, uA_PcPredict_jr, uA_CacheBlock, uA_IFetch),
   DEC_stage [capacity:4]  (uA_Decode),
-  RN_stage  [capacity:4]  (uA_Rename),
-  OoO_stage [capacity:48, output-buffer] (OoO_subpipe_alu, OoO_subpipe_agu, OoO_subpipe_store),
-  COM_stage [capacity:4]  (uA_Commit)
+  RN_stage  [capacity:5]  (uA_Rename),
+  OoO_stage [capacity:56, output-buffer] (OoO_subpipe_alu, OoO_subpipe_agu, OoO_subpipe_store),
+  COM_stage [capacity:8]  (uA_Commit, uA_Memory_W, uA_Memory_R)
 }
 
 Pipeline RV32_4ISSUE_pipeline (IF_stage -> DEC_stage -> RN_stage -> OoO_stage -> COM_stage)
@@ -136,7 +143,7 @@ Pipeline RV32_4ISSUE_pipeline (IF_stage -> DEC_stage -> RN_stage -> OoO_stage ->
 /************************************* External Models *************************************/
 TraceValue {rs1, rs2, rd, pc, addr, brTarget, imm, rs1_data, rs2_data}
 
-Model iCacheModel(
+Model iCacheModel [info-trace](
     link : "models/rv32_4issue/ICacheModel.h"
     trace : {pc}
     connectorIn : {Ic_in}
@@ -150,13 +157,19 @@ Model regModel (
   connectorOut : {Xa, Xb}
 )
 
-Model dynBranchPredModel (
+Model dynBranchPredModel [info-trace] (
     link : "models/rv32_4issue/BranchPredictionModel.h"
     trace : {pc, brTarget, rs1, rd, imm}
     connectorIn : {Pc_p, Pc_p_j, Pc_p_jr, Pc_c}
     connectorOut : {Pc_mp, Pc_pt}
 )
 
+Model staBranchPredModel [info-trace] (
+  link : "models/rv32_4issue/StaticBranchPredictModel.h"
+  trace : {pc, brTarget}
+  connectorIn : {Pc_p, Pc_p_j, Pc_p_jr, Pc_c}
+  connectorOut : {Pc_mp, Pc_pt}
+)
 
 Model divider (
   link: "models/rv32_4issue/DividerModel.h"
@@ -168,7 +181,7 @@ Model divider_u (
   trace: rs2_data
 )
 
-Model dCacheModel (
+Model dCacheModel [info-trace](
     link: "models/rv32_4issue/DCacheModel.h"
     trace : addr
 )
@@ -200,8 +213,8 @@ MicroactionMapping {
   OPC_REG_IMM :  {uA_PcPredict, uA_Decode, uA_OF_A_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate},
   OPC_AUIPC   :  {uA_PcPredict, uA_Decode, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate},
   OPC_LUI     :  {uA_PcPredict, uA_Decode, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate},
-  Mul_Ra_Rb   :  {uA_PcPredict, uA_Decode, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_MUL},
-  MulH_Ra_Rb  :  {uA_PcPredict, uA_Decode, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_MUL},
+  Mul_Ra_Rb   :  {uA_PcPredict, uA_Decode, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_MUL1, uA_MUL2, uA_MUL3, uA_MUL},
+  MulH_Ra_Rb  :  {uA_PcPredict, uA_Decode, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_MUL1, uA_MUL2, uA_MUL3, uA_MUL},
   Div_Ra_Rb   :  {uA_PcPredict, uA_Decode, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_DIV},
   DivU_Ra_Rb  :  {uA_PcPredict, uA_Decode, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_DIVU},
   Csr_Ra      :  {uA_PcPredict, uA_Decode, uA_OF_A_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_CSR},
@@ -209,7 +222,7 @@ MicroactionMapping {
   OPC_STORE   :  {uA_PcPredict, uA_Decode, uA_OF_A_store, uA_OF_B_store, uA_Issue_STORE, uA_LookUP_STORE, uA_STORE, uA_Memory_W},
   OPC_LOAD    :  {uA_PcPredict, uA_Decode, uA_OF_A_agu, uA_Issue_AGU, uA_LookUP_AGU, uA_LOAD, uA_DCache, uA_Memory_R},
   OPC_BRANCH  :  {uA_PcPredict_br, uA_Decode, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_Branch},
-  OPC_JAL     :  {uA_PcPredict_j, uA_Decode, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate},
+  OPC_JAL     :  {uA_PcPredict_j, uA_Decode, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_Jr},
   OPC_JALR    :  {uA_PcPredict_jr, uA_Decode, uA_OF_A_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_Jr}
 }
 
@@ -270,21 +283,25 @@ TraceValueMapping {
   },
   OPC_LOAD : {
     rs1 = "$bitfield{rs1}",
-    rd  = "$bitfield{rd}"
+    rd  = "$bitfield{rd}",
+    addr = "($reg{$bitfield{rs1}} + $bitfield{imm})"
   },
   OPC_BRANCH : {
     rs1 = "$bitfield{rs1}",
     rs2 = "$bitfield{rs2}",
-    brTarget = "$resolved{$pc + (((int16_t)($bitfield{imm} << 3)) >> 3)}"
+    brTarget = "$resolved{$pc + (((int16_t)($bitfield{imm} << 3)) >> 3)}",
+    imm = "$resolved{(((int16_t)($bitfield{imm} << 3)) >> 3)}"
   },
   OPC_JAL : {
     rd = "$bitfield{rd}",
-    brTarget = "$resolved{$pc + (((int32_t)($bitfield{imm} << 11)) >> 11)}"
+    brTarget = "$resolved{$pc + (((int32_t)($bitfield{imm} << 11)) >> 11)}",
+    imm = "$resolved{(((int32_t)($bitfield{imm} << 11)) >> 11)}"
   },
   OPC_JALR : {
     rs1 = "$bitfield{rs1}",
     rd  = "$bitfield{rd}",
-    brTarget = "($reg{$bitfield{rs1}} + $resolved{(((int16_t)($bitfield{imm} << 4)) >> 4)}) & -2U"
+    brTarget = "($reg{$bitfield{rs1}} + $resolved{(((int16_t)($bitfield{imm} << 4)) >> 4)}) & -2U",
+    imm = "$resolved{(((int16_t)($bitfield{imm} << 4)) >> 4)}"
   }
 }
 
