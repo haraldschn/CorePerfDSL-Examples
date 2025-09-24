@@ -20,15 +20,18 @@ Connector {Ic_out, Ic_in}
 Connector {Dc_out, Dc_in}
 Connector {Xa, Xb, Xd}
 
-Resource {PCGen, ICacheCtrl, IScan, Decoder} 
+Connector {Dec_INT, Dec_MUL, Dec_BR, Dec_CSR, Dec_DIV, EX_Alu, COM_Alu}
+Connector {Issue_ALU}
+
+Resource {PCGen(fetchAligner), ICacheCtrl, IScan, Decoder} 
 Resource {Rename}
 Resource {Issue(2)}
 Resource {OperandLookup}
-Resource {ALU, STORE, LOAD, CSR}
-Resource {MUL1, MUL2, MUL3, MUL4}
-Resource {DIV(divider), DIVU(divider_u)}
-Resource {ICache(iCacheModel), DCache(dCacheModel), DCache_Store(3)}
-Resource {Commit(2)}
+Resource {ALU, MUL(4), DIV(divider), DIVU(divider_u)}
+Resource {STORE, LOAD}
+Resource {ICache(iCacheModel), DCache(dCacheModel), DCache_Store(2)}
+Resource {Commit}
+Resource {WFC}
 
 Microaction {
   uA_PCGen      (PCGen),
@@ -44,40 +47,44 @@ Microaction {
   uA_IScan_jr   (IScan -> Pc_p_jr),
 
   uA_Decode        (Decoder),
+  uA_Decode_alu    (Decoder -> Dec_INT),
+  uA_Decode_mul    (Decoder -> Dec_MUL),
+  uA_Decode_div    (Decoder -> Dec_DIV),
+  uA_Decode_br     (Decoder -> Dec_BR),
+  uA_Decode_csr    (Decoder -> Dec_CSR),
+
   uA_Rename        (Rename),
+
+  uA_Issue_ALU     (Issue_ALU),
+  uA_Issue_AGU     (Issue),
 
   uA_OF_A_alu      (Xa),
   uA_OF_A_agu      (Xa),
-  uA_OF_A_store    (Xa),
   uA_OF_B_alu      (Xb),
   uA_OF_B_agu      (Xb),
-  uA_OF_B_store    (Xb),
-
-  uA_Issue_ALU     (Issue),
-  uA_Issue_AGU     (Issue),
-  uA_Issue_STORE   (Issue),
 
   uA_LookUP_ALU    (OperandLookup),
   uA_LookUP_AGU    (OperandLookup),
   uA_LookUP_STORE  (OperandLookup),
 
-  uA_ALU_RegUpdate (ALU -> Xd),
-  uA_ALU_Jr        (ALU -> Xd),
-  uA_ALU_Branch    (ALU),
-  uA_CSR           (CSR -> Xd),
-  uA_STORE         (STORE -> Dc_in),
+  uA_ALU_RegUpdate (ALU -> {Xd, EX_Alu}),
+  uA_ALU_Branch    (ALU -> EX_Alu),
+  uA_MUL           (MUL -> {Xd, EX_Alu}),
+  uA_DIV           (DIV -> {Xd, EX_Alu}),
+  uA_DIVU          (DIVU -> {Xd, EX_Alu}),
+
+  uA_STORE         (STORE),
   uA_LOAD          (LOAD),
-  uA_MUL1          (MUL1),
-  uA_MUL2          (MUL2),
-  uA_MUL3          (MUL3),
-  uA_MUL           (MUL4 -> Xd),
-  uA_DIV           (DIV -> Xd),
-  uA_DIVU          (DIVU -> Xd),
 
   uA_DCache        (DCache -> Xd),
 
+  uA_WFC_alu       (WFC -> COM_Alu),
+  uA_WFC_alu_JB    (WFC -> {Pc_c, COM_Alu}),
+
+  uA_WFC_agu       (WFC),
+  uA_WFC_store     (WFC),
   uA_DCache_Store  (DCache_Store),
-  uA_Commit_JB     (Commit -> Pc_c),
+  
   uA_Commit        (Commit)
 }
 
@@ -96,66 +103,44 @@ Pipeline IF_subpipe (PC_substage -> IF_substage_0 -> IF_substage_1 -> IF_substag
 
 // IssueQueue Substages
 Stage {
-  IS_substage_alu     [capacity:24] (uA_Issue_ALU),
-  IS_substage_agu     [capacity:16] (uA_Issue_AGU),
-  IS_substage_store   [capacity:16] (uA_Issue_STORE)
+  IS_substage_alu_OoO [capacity:24] (uA_Issue_ALU, uA_OF_A_alu, uA_OF_B_alu),
+  IS_substage_agu     [capacity:16] (uA_Issue_AGU, uA_OF_A_agu, uA_OF_B_agu)
 }
 
 // OperandLookup Substages
 Stage {
-  LD_substage_alu     [capacity:3] (uA_LookUP_ALU, uA_OF_A_alu, uA_OF_B_alu),
-  LD_substage_agu     [capacity:2] (uA_LookUP_AGU, uA_OF_A_agu, uA_OF_B_agu),
-  LD_substage_store   [capacity:2] (uA_LookUP_STORE, uA_OF_A_store, uA_OF_B_store)
-}
-
-// EX Substages
-Stage {
-    EX_substage_alu    [capacity:3] (uA_ALU_RegUpdate),
-    EX_substage_mul_1  [capacity:2] (uA_MUL1),
-    EX_substage_mul_2  [capacity:2] (uA_MUL2),
-    EX_substage_mul_3  [capacity:2] (uA_MUL3),
-    EX_substage_mul_4  [capacity:2] (uA_MUL),
-    EX_substage_branch [capacity:2] (uA_ALU_Branch, uA_ALU_Jr),
-    EX_substage_div             (uA_DIVU, uA_DIV),
-    EX_substage_csr             (uA_CSR),
-    EX_substage_agu    [capacity:2] (uA_LOAD, uA_DCache),
-    EX_substage_store  [capacity:2] (uA_STORE)
-}
-
-// EX Subpipeline
-Pipeline {
-    EX_subpipe_alu      (EX_substage_alu),
-    EX_subpipe_mul      (EX_substage_mul_1 -> EX_substage_mul_2 -> EX_substage_mul_3 -> EX_substage_mul_4),
-    EX_subpipe_branch   (EX_substage_branch),
-    EX_subpipe_div      (EX_substage_div),
-    EX_subpipe_csr      (EX_substage_csr),
-    EX_subpipe_agu      (EX_substage_agu),
-    EX_substage_store   (EX_substage_store)
+  LD_substage_alu_OoO [capacity:24] (uA_LookUP_ALU),
+  LD_substage_agu     [capacity:16] (uA_LookUP_AGU, uA_LookUP_STORE)
 }
 
 // EX Stage
 Stage {
-  EX_stage_alu    [capacity:9] (EX_subpipe_csr, EX_subpipe_div, EX_subpipe_alu, EX_subpipe_mul, EX_subpipe_branch),
-  EX_stage_agu    [capacity:2] (EX_subpipe_agu),
-  EX_stage_store  [capacity:2] (EX_substage_store)
+  EX_stage_alu_OoO  [capacity:24] (uA_ALU_RegUpdate, uA_ALU_Branch, uA_MUL, uA_DIVU, uA_DIV),
+  EX_stage_agu      [capacity:2]  (uA_LOAD, uA_STORE)
+}
+
+// WFC Stage
+Stage {
+  WFC_stage_alu [capacity: 64] (uA_WFC_alu, uA_WFC_alu_JB),
+  WFC_stage_agu [capacity: 16] (uA_WFC_agu, uA_WFC_store, uA_DCache, uA_DCache_Store)
 }
 
 // OoO Pipeline
 Pipeline {
-  OoO_subpipe_alu    (IS_substage_alu -> LD_substage_alu -> EX_stage_alu),
-  OoO_subpipe_agu    (IS_substage_agu -> LD_substage_agu -> EX_stage_agu),
-  OoO_subpipe_store  (IS_substage_store -> LD_substage_store -> EX_stage_store)
+  OoO_subpipe_alu    (IS_substage_alu_OoO -> LD_substage_alu_OoO -> EX_stage_alu_OoO -> WFC_stage_alu),
+  OoO_subpipe_agu    (IS_substage_agu -> LD_substage_agu -> EX_stage_agu -> WFC_stage_agu)
 }
+
+Pipeline OoO_pipeline (OoO_subpipe_alu | OoO_subpipe_agu)
 
 Stage {
   IF_stage  [capacity:16] (IF_subpipe),
-  DEC_stage [capacity:4]  (uA_Decode),
+  DEC_stage [capacity:4]  (uA_Decode, uA_Decode_alu, uA_Decode_mul, uA_Decode_div, uA_Decode_br, uA_Decode_csr),
   RN_stage  [capacity:5]  (uA_Rename),
-  OoO_stage [capacity:64, output-buffer] (OoO_subpipe_alu, OoO_subpipe_agu, OoO_subpipe_store),
-  COM_stage [capacity:8]  (uA_Commit, uA_Commit_JB, uA_DCache_Store)
+  COM_stage [capacity:4]  (uA_Commit)
 }
 
-Pipeline RV32_4ISSUE_pipeline (IF_stage -> DEC_stage -> RN_stage -> OoO_stage -> COM_stage)
+Pipeline RV32_4ISSUE_pipeline (IF_stage -> DEC_stage -> RN_stage -> OoO_pipeline -> COM_stage)
 
 /************************************* External Models *************************************/
 TraceValue {rs1, rs2, rd, pc, addr, brTarget, imm, rs1_data, rs2_data}
@@ -168,7 +153,7 @@ Model iCacheModel [info-trace](
 )
 
 Model regModel (
-  link : "models/common/StandardRegisterModel.h"
+  link : "models/rv32_4issue/RegisterModel.h"
   trace : {rs1, rs2, rd}
   connectorIn : Xd
   connectorOut : {Xa, Xb}
@@ -205,6 +190,17 @@ Model dCacheModel [info-trace](
     connectorOut : {Dc_out}
 )
 
+Model fetchAligner (
+    link : "models/rv32_4issue/FetchAligner.h"
+    trace : pc
+)
+
+Model scheduler (
+    link : "models/rv32_4issue/Scheduler.h"
+    trace : pc
+    connectorIn : {Dec_INT, Dec_MUL, Dec_BR, Dec_CSR, Dec_DIV, EX_Alu, COM_Alu}
+    connectorOut : {Issue_ALU}
+)
 
 /*********************************** Instruction Section ***********************************/
 InstrGroup {
@@ -227,22 +223,22 @@ InstrGroup {
 }
 
 MicroactionMapping {
-  [ALL]       :  {uA_PCGen, uA_PcCorrect, uA_CacheBlock, uA_ICacheCtrl, uA_PcPredict, uA_ICache, uA_Decode, uA_Rename},
-  OPC_REG_REG :  {uA_IScan, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_Commit},
-  OPC_REG_IMM :  {uA_IScan, uA_OF_A_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_Commit},
-  OPC_AUIPC   :  {uA_IScan, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_Commit},
-  OPC_LUI     :  {uA_IScan, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_Commit},
-  Mul_Ra_Rb   :  {uA_IScan, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_MUL1, uA_MUL2, uA_MUL3, uA_MUL, uA_Commit},
-  MulH_Ra_Rb  :  {uA_IScan, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_MUL1, uA_MUL2, uA_MUL3, uA_MUL, uA_Commit},
-  Div_Ra_Rb   :  {uA_IScan, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_DIV, uA_Commit},
-  DivU_Ra_Rb  :  {uA_IScan, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_DIVU, uA_Commit},
-  Csr_Ra      :  {uA_IScan, uA_OF_A_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_CSR, uA_Commit},
-  Csr_X       :  {uA_IScan, uA_Issue_ALU, uA_LookUP_ALU, uA_CSR, uA_Commit},
-  OPC_STORE   :  {uA_IScan, uA_OF_A_store, uA_OF_B_store, uA_Issue_STORE, uA_LookUP_STORE, uA_STORE, uA_DCache_Store, uA_Commit},
-  OPC_LOAD    :  {uA_IScan, uA_OF_A_agu, uA_Issue_AGU, uA_LookUP_AGU, uA_LOAD, uA_DCache, uA_Commit},
-  OPC_BRANCH  :  {uA_IScan_br, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_Branch, uA_Commit_JB},
-  OPC_JAL     :  {uA_IScan_j, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_Jr, uA_Commit_JB},
-  OPC_JALR    :  {uA_IScan_jr, uA_OF_A_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_Jr, uA_Commit_JB}
+  [ALL]       :  {uA_PCGen, uA_PcCorrect, uA_CacheBlock, uA_ICacheCtrl, uA_PcPredict, uA_ICache, uA_Rename, uA_Commit},
+  OPC_REG_REG :  {uA_IScan, uA_Decode_alu, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_WFC_alu},
+  OPC_REG_IMM :  {uA_IScan, uA_Decode_alu, uA_OF_A_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_WFC_alu},
+  OPC_AUIPC   :  {uA_IScan, uA_Decode_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_WFC_alu},
+  OPC_LUI     :  {uA_IScan, uA_Decode_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_WFC_alu},
+  Mul_Ra_Rb   :  {uA_IScan, uA_Decode_mul, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_MUL, uA_WFC_alu},
+  MulH_Ra_Rb  :  {uA_IScan, uA_Decode_mul, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_MUL, uA_WFC_alu},
+  Div_Ra_Rb   :  {uA_IScan, uA_Decode_div, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_DIV, uA_WFC_alu},
+  DivU_Ra_Rb  :  {uA_IScan, uA_Decode_div, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_DIVU, uA_WFC_alu},
+  Csr_Ra      :  {uA_IScan, uA_Decode_csr, uA_OF_A_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_WFC_alu},
+  Csr_X       :  {uA_IScan, uA_Decode_csr, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_WFC_alu},
+  OPC_STORE   :  {uA_IScan, uA_Decode, uA_Issue_AGU, uA_OF_A_agu, uA_OF_B_agu, uA_LookUP_STORE, uA_STORE, uA_DCache_Store, uA_WFC_store},
+  OPC_LOAD    :  {uA_IScan, uA_Decode, uA_Issue_AGU, uA_OF_A_agu, uA_LookUP_AGU, uA_LOAD, uA_DCache, uA_WFC_agu},
+  OPC_BRANCH  :  {uA_IScan_br, uA_Decode_br, uA_OF_A_alu, uA_OF_B_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_Branch, uA_WFC_alu_JB},
+  OPC_JAL     :  {uA_IScan_j, uA_Decode_br, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_WFC_alu_JB},
+  OPC_JALR    :  {uA_IScan_jr, uA_Decode_br, uA_OF_A_alu, uA_Issue_ALU, uA_LookUP_ALU, uA_ALU_RegUpdate, uA_WFC_alu_JB}
 }
 
 
@@ -329,5 +325,5 @@ TraceValueMapping {
 CorePerfModel RV32_4ISSUE (
   core : "RV32IMACFD"
   use Pipeline : RV32_4ISSUE_pipeline
-  use ConnectorModel : {regModel, dynBranchPredModel, iCacheModel, dCacheModel}
+  use ConnectorModel : {regModel, dynBranchPredModel, iCacheModel, dCacheModel, scheduler}
 )
