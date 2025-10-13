@@ -28,7 +28,7 @@ Resource {PCGen, ICacheCtrl, IScan, Decoder}
 Resource {Rename}
 Resource {Issue(2)}
 Resource {LookupALU(schedModel), LookupAGU}
-Resource {ALU(schedModel), MUL(4), DIV(divider), DIVU(divider_u)}
+Resource {ALU(schedModel), MUL(4), DIV(33), DIVU(33)}
 Resource {STORE, LOAD}
 Resource {ICache(iCacheModel), DCache(dCacheModel), DCache_Store(2)}
 Resource {Commit}
@@ -104,20 +104,20 @@ Pipeline IF_subpipe (PC_substage -> IF_substage_0 -> IF_substage_1 -> IF_substag
 
 // IssueQueue Substages
 Stage {
-  IS_substage_alu_OoO [capacity:24] (uA_Issue_ALU, uA_OF_A_alu, uA_OF_B_alu),
-  IS_substage_agu [capacity:16] (uA_Issue_AGU, uA_OF_A_agu, uA_OF_B_agu)
+  IS_substage_alu_OoO [capacity:24, output-buffer] (uA_Issue_ALU, uA_OF_A_alu, uA_OF_B_alu),
+  IS_substage_agu     [capacity:16, output-buffer] (uA_Issue_AGU, uA_OF_A_agu, uA_OF_B_agu)
 }
 
 // OperandLookup Substages
 Stage {
-  LD_substage_alu_OoO [capacity:24] (uA_LookUP_ALU),
-  LD_substage_agu     [capacity:2]  (uA_LookUP_AGU)
+  LD_substage_alu_OoO [capacity:64] (uA_LookUP_ALU),
+  LD_substage_agu     [capacity:2]  (uA_LookUP_AGU)   // capacity acts as guard for AGU (only 2 can enter EX Phase)
 }
 
 // EX Stage
 Stage {
-  EX_stage_alu_OoO  [capacity:24] (uA_ALU_RegUpdate, uA_ALU_Branch, uA_MUL, uA_DIVU, uA_DIV),
-  EX_stage_agu  [capacity:2]  (uA_LOAD, uA_STORE)
+  EX_stage_alu_OoO  [capacity:64] (uA_ALU_RegUpdate, uA_ALU_Branch, uA_MUL, uA_DIVU, uA_DIV),
+  EX_stage_agu      [capacity:64] (uA_LOAD, uA_STORE)
 }
 
 // WFC Stage
@@ -135,7 +135,7 @@ Pipeline {
 Pipeline OoO_pipeline (OoO_subpipe_alu | OoO_subpipe_agu)
 
 Stage {
-  IF_stage  [capacity:20] (IF_subpipe),
+  IF_stage  [capacity:16] (IF_subpipe),
   DEC_stage [capacity:4]  (uA_Decode),
   RN_stage  [capacity:4]  (uA_Rename, uA_Rename_addi, uA_Rename_alu, uA_Rename_mul, uA_Rename_div, uA_Rename_br, uA_Rename_j, uA_Rename_jr, uA_Rename_csr),
   COM_stage [capacity:4]  (uA_Commit)
@@ -172,16 +172,6 @@ Model staBranchPredModel [info-trace] (
   trace : {pc, brTarget}
   connectorIn : {Pc_p, Pc_p_j, Pc_p_jr, Pc_c}
   connectorOut : {Pc_mp, Pc_pt}
-)
-
-Model divider (
-  link: "models/rv32_4issue/DividerModel.h"
-  trace: rs2_data
-)
-
-Model divider_u (
-  link: "models/rv32_4issue/DividerUnsignedModel.h"
-  trace: rs2_data
 )
 
 Model dCacheModel [info-trace](
