@@ -1,0 +1,267 @@
+/*
+ * Copyright 2025 Chair of EDA, Technical University of Munich
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *	 http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*********************************** Microaction Section ***********************************/
+Connector {Pc, Pc_np, Pc_p}
+Connector {Xa, Xb, Xd}
+Connector {Cb_out, Cb_inRd, Cb_inR1, Cb_inR2}
+Connector {Dec_div, Dec_mul, Dec_br, Dec_alu, Dec_st, Dec_ld, T_issue, T_wb}
+
+Resource {PCGen, Decoder, JumpDecoder, ALU, ADD, LSU, CSR}
+Resource {MUL0, MUL1}
+Resource {DIV(4)}
+Resource {IPort_R, DPort_R, DPort_W}
+Resource {WB}
+Resource {Dummy_Cb_out}
+
+Microaction {
+  uA_PCGen         (Pc -> PCGen -> Pc_p),
+
+  uA_IFetch        (IPort_R),
+  uA_Clobber       (Cb_out),
+//uA_Clobber       (Dummy_Cb_out), // Change to this uAction to deactivate WAW
+
+  uA_Decode_div    (Decoder -> Dec_div),
+  uA_Decode_mul    (Decoder -> Dec_mul),
+  uA_Decode_br     (Decoder -> Dec_br),
+  uA_Decode_alu    (Decoder -> Dec_alu),
+  uA_Decode_st     (Decoder -> Dec_st),
+  uA_Decode_ld     (Decoder -> Dec_ld),
+  uA_JumpDecode    (JumpDecoder -> {Pc_np, Dec_br}),
+  uA_JumpDecodeReg (Xa -> JumpDecoder -> {Pc_np, Dec_br}),
+
+  uA_OF_A          (Xa),
+  uA_OF_B          (Xb),
+  uA_Issue         (T_issue),
+
+  uA_ALU_RegUpdate        (ALU -> {Xd, Cb_inRd}),
+  uA_ALU_RegUpdate_Ra     (ALU -> {Xd, Cb_inRd, Cb_inR1}),
+  uA_ALU_RegUpdate_Ra_Rb  (ALU -> {Xd, Cb_inRd, Cb_inR1, Cb_inR2}),
+
+  uA_ALU_Branch    (ADD -> {Pc_np, Cb_inR1, Cb_inR2}),
+  uA_ALU_Jal       (ADD -> {Xd, Cb_inRd}),
+  uA_ALU_Jalr      (ADD -> {Xd, Cb_inRd, Cb_inR1}),
+
+  uA_CSR           (CSR -> {Xd, Cb_inRd}),
+  uA_LSU           (LSU),
+  uA_MUL0          (MUL0),
+  uA_MUL1          (MUL1 -> {Xd, Cb_inRd, Cb_inR1, Cb_inR2}),
+  uA_DIV           (DIV -> {Xd, Cb_inRd, Cb_inR1, Cb_inR2}),
+  uA_Memory_R      (DPort_R -> {Xd, Cb_inRd}),
+  uA_Memory_W      (DPort_W -> {Cb_inR1, Cb_inR2}),
+  
+  uA_WB            (WB -> T_wb)
+}
+
+/************************************ Stages & Pipeline ************************************/
+
+Stage {
+  EX_stage_mul0 (uA_MUL0),
+  EX_stage_mul1 (uA_MUL1),
+  EX_stage_lu0  (uA_LSU),
+  EX_stage_lu1  (uA_Memory_R),
+  EX_stage_su   (uA_Memory_W)
+}
+
+Pipeline {
+  EX_subpipe_mul (EX_stage_mul0 -> EX_stage_mul1),
+  EX_subpipe_lu  (EX_stage_lu0 -> EX_stage_lu1),
+  EX_subpipe_su  (EX_stage_su)
+}
+
+// EX Stages
+Stage {
+  EX_stage_div_NoB (uA_DIV),
+  EX_stage_mul_NoB [capacity: 2] (EX_subpipe_mul),
+  EX_stage_br_NoB  (uA_ALU_Branch, uA_ALU_Jal, uA_ALU_Jalr),
+  EX_stage_alu_NoB (uA_ALU_RegUpdate, uA_ALU_RegUpdate_Ra, uA_ALU_RegUpdate_Ra_Rb, uA_CSR),
+  EX_stage_lsu_NoB [capacity: 2] (EX_subpipe_lu, EX_subpipe_su)
+}
+
+// EX Sub-pipelines
+Pipeline {
+  EX_div (EX_stage_div_NoB),
+  EX_mul (EX_stage_mul_NoB),
+  EX_br  (EX_stage_br_NoB),
+  EX_alu (EX_stage_alu_NoB),
+  EX_lsu (EX_stage_lsu_NoB)
+}
+
+Pipeline EX_pipeline (EX_div | EX_mul | EX_br | EX_alu | EX_lsu)
+
+// In-Order replacement stages 
+Stage {
+  IB_stage (uA_OF_A, uA_OF_B, uA_Issue),
+  EX_stage (EX_div, EX_mul, EX_br, EX_alu, EX_lsu),
+  WB_stage (uA_WB)
+}
+
+// Top stages (OoO + general)
+Stage {
+  PC_stage (uA_PCGen),
+  IF_stage (uA_IFetch, uA_Clobber),
+  IS_stage (uA_Decode_div, uA_Decode_mul, uA_Decode_br, uA_Decode_alu, uA_Decode_st, uA_Decode_ld, uA_JumpDecode, uA_JumpDecodeReg),
+  IB_stage_OoO [capacity: 4] (uA_OF_A, uA_OF_B, uA_Issue),
+  WB_stage_NoB [capacity: 4] (uA_WB)
+}
+
+Pipeline RV32_inO_pipeline (PC_stage -> IF_stage -> IS_stage -> IB_stage -> EX_pipeline -> WB_stage)
+Pipeline RV32_OOO_pipeline (PC_stage -> IF_stage -> IS_stage -> IB_stage_OoO -> EX_pipeline -> WB_stage_NoB)
+
+/************************************* External Models *************************************/
+TraceValue {rs1, rs2, rd, pc, brTarget, rs2_data}
+
+Model noBranchPredModel [info-trace] (
+    link : "models/rv32_ooo/NoBranchPredictModel.h"
+    connectorIn : {Pc_p, Pc_np}
+    connectorOut : Pc
+)
+
+Model clobberModel (
+    link : "models/rv32_ooo/ClobberModel.h"
+    trace : {rs1, rs2, rd}
+    connectorIn : {Cb_inRd, Cb_inR1, Cb_inR2}
+    connectorOut : Cb_out
+)
+
+Model scheduleModel (
+    link : "models/rv32_ooo/Scheduler.h"
+    trace : {pc, rs1, rs2, rd}
+    connectorIn :  {Xd, Dec_div, Dec_mul, Dec_br, Dec_alu, Dec_st, Dec_ld, T_wb}
+    connectorOut : {Xa, Xb, T_issue}
+)
+
+/*********************************** Instruction Section ***********************************/
+InstrGroup {
+  Arith_Ra_Rb (add, sub, xor, or, and, slt, sltu, sll, srl, sra),
+  Arith_Ra (addi, xori, ori, andi, slti, sltiu, slli, srli, srai),
+  Arith_X (auipc, lui),
+  Mul_Ra_Rb (mul),
+  MulH_Ra_Rb (mulh, mulhu, mulhsu),
+  Div_Ra_Rb (div, rem),
+  DivU_Ra_Rb (divu, remu),
+  Csr_Ra (csrrw, csrrs, csrrc),
+  Csr_X (csrrwi, csrrsi, csrrci),
+  Store (sb, sh, sw),
+  Load (lw, lh, lhu, lb, lbu),
+  Branch_Ra_Rb (beq, bne, blt, bge, bltu, bgeu),
+  Default ([?])
+}
+
+MicroactionMapping {
+  [ALL] :        {uA_IFetch, uA_PCGen, uA_Issue},
+  Default :      {uA_WB},
+  Arith_Ra_Rb :  {uA_Decode_alu, uA_Clobber, uA_OF_A, uA_OF_B, uA_ALU_RegUpdate_Ra_Rb, uA_WB},
+  Arith_Ra :     {uA_Decode_alu, uA_Clobber, uA_OF_A, uA_ALU_RegUpdate_Ra, uA_WB},
+  Arith_X :      {uA_Decode_alu, uA_Clobber, uA_ALU_RegUpdate, uA_WB},
+  Mul_Ra_Rb :    {uA_Decode_mul, uA_Clobber, uA_OF_A, uA_OF_B, uA_MUL0, uA_MUL1, uA_WB},
+  MulH_Ra_Rb :   {uA_Decode_mul, uA_Clobber, uA_OF_A, uA_OF_B, uA_MUL0, uA_MUL1, uA_WB},
+  Div_Ra_Rb :    {uA_Decode_div, uA_Clobber, uA_OF_A, uA_OF_B, uA_DIV, uA_WB},
+  DivU_Ra_Rb :   {uA_Decode_div, uA_Clobber, uA_OF_A, uA_OF_B, uA_DIV, uA_WB},
+  Csr_Ra :       {uA_Decode_alu, uA_Clobber, uA_OF_A, uA_CSR, uA_WB},
+  Csr_X :        {uA_Decode_alu, uA_Clobber, uA_CSR, uA_WB},
+  Store :        {uA_Decode_st, uA_OF_A, uA_OF_B, uA_Memory_W, uA_WB},
+  Load :         {uA_Decode_ld, uA_Clobber, uA_OF_A, uA_LSU, uA_Memory_R, uA_WB},
+  Branch_Ra_Rb : {uA_Decode_br, uA_OF_A, uA_OF_B, uA_ALU_Branch, uA_WB},
+  jal :          {uA_JumpDecode, uA_Clobber, uA_ALU_Jal, uA_WB},
+  jalr :         {uA_JumpDecodeReg, uA_Clobber, uA_ALU_Jalr, uA_WB}
+}
+
+
+TraceValueMapping {
+  [ALL] : {
+      pc = "$resolved{$pc}"
+  },
+  Arith_Ra_Rb : {
+    rs1 = "$bitfield{rs1}",
+    rs2 = "$bitfield{rs2}",
+    rd  = "$bitfield{rd}"
+  },
+  Arith_Ra : {
+    rs1 = "$bitfield{rs1}",
+    rd  = "$bitfield{rd}"
+  },
+  Arith_X : {
+    rd  = "$bitfield{rd}"
+  },
+  Mul_Ra_Rb : {
+    rs1 = "$bitfield{rs1}",
+    rs2 = "$bitfield{rs2}",
+    rd  = "$bitfield{rd}"
+  },
+  MulH_Ra_Rb : {
+    rs1 = "$bitfield{rs1}",
+    rs2 = "$bitfield{rs2}",
+    rd  = "$bitfield{rd}"
+  },
+  Div_Ra_Rb : {
+    rs1 = "$bitfield{rs1}",
+    rs2 = "$bitfield{rs2}",
+    rd  = "$bitfield{rd}",
+    rs2_data = "$reg{$bitfield{rs2}}"
+  },
+  DivU_Ra_Rb : {
+    rs1 = "$bitfield{rs1}",
+    rs2 = "$bitfield{rs2}",
+    rd  = "$bitfield{rd}",
+    rs2_data = "$reg{$bitfield{rs2}}"
+  },
+  Csr_Ra : {
+    rs1 = "$bitfield{rs1}",
+    rd  = "$bitfield{rd}"
+  },
+  Csr_X : {
+    rd  = "$bitfield{rd}"
+  },
+  Store : {
+    rs1 = "$bitfield{rs1}",
+    rs2 = "$bitfield{rs2}"
+  },
+  Load : {
+    rs1 = "$bitfield{rs1}",
+    rd  = "$bitfield{rd}"
+  },
+  Branch_Ra_Rb : {
+    rs1 = "$bitfield{rs1}",
+    rs2 = "$bitfield{rs2}",
+    brTarget = "$resolved{$pc + (((int16_t)($bitfield{imm} << 3)) >> 3)}"
+  },
+  jal : {
+    rd = "$bitfield{rd}",
+    brTarget = "$resolved{$pc + (((int32_t)($bitfield{imm} << 11)) >> 11)}"
+  },
+  jalr : {
+    rs1 = "$bitfield{rs1}",
+    rd  = "$bitfield{rd}",
+    brTarget = "($reg{$bitfield{rs1}} + $resolved{(((int16_t)($bitfield{imm} << 4)) >> 4)}) & -2U"
+  }
+}
+
+/**************************************** Variants *****************************************/
+
+/*
+* CorePerfModel RV32_inO (
+*  core : "RV32IMACFD"
+*  use Pipeline : RV32_inO_pipeline
+*  use ConnectorModel : {noBranchPredModel, clobberModel, scheduleModel}
+*)
+*/
+
+CorePerfModel RV32_OOO (
+  core : "RV32IMACFD"
+  use Pipeline : RV32_OOO_pipeline
+  use ConnectorModel : {noBranchPredModel, clobberModel, scheduleModel}
+)
