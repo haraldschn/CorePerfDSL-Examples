@@ -69,17 +69,17 @@ Microaction {
 /************************************ Stages & Pipeline ************************************/
 
 Stage {
-  EX_stage_mul0 (uA_MUL0),
-  EX_stage_mul1 (uA_MUL1),
-  EX_stage_lu0  (uA_LSU),
-  EX_stage_lu1  (uA_Memory_R),
-  EX_stage_su   (uA_Memory_W)
+  EX_stage_mul0v_NoB (uA_MUL0),
+  EX_stage_mul1v_NoB (uA_MUL1),
+  EX_stage_lu0v_NoB  (uA_LSU),
+  EX_stage_lu1v_NoB  (uA_Memory_R),
+  EX_stage_suv_NoB   (uA_Memory_W)
 }
 
 Pipeline {
-  EX_subpipe_mul (EX_stage_mul0 -> EX_stage_mul1),
-  EX_subpipe_lu  (EX_stage_lu0 -> EX_stage_lu1),
-  EX_subpipe_su  (EX_stage_su)
+  EX_subpipe_mul (EX_stage_mul0v_NoB -> EX_stage_mul1v_NoB),
+  EX_subpipe_lu  (EX_stage_lu0v_NoB -> EX_stage_lu1v_NoB),
+  EX_subpipe_su  (EX_stage_suv_NoB)
 }
 
 // EX Stages
@@ -118,11 +118,15 @@ Stage {
   WB_stage_NoB [capacity: 4] (uA_WB)
 }
 
+// "Pseudo" Stage to keep capacity of Scoreboard less.eq. 4
+//Pipeline IB_WB (IB_stage_OoO -> EX_pipeline -> WB_stage_NoB)
+//Stage { IB_capacity_OoO [capacity: 4] (IB_WB) }
+
 Pipeline RV32_inO_pipeline (PC_stage -> IF_stage -> IS_stage -> IB_stage -> EX_pipeline -> WB_stage)
 Pipeline RV32_OOO_pipeline (PC_stage -> IF_stage -> IS_stage -> IB_stage_OoO -> EX_pipeline -> WB_stage_NoB)
 
 /************************************* External Models *************************************/
-TraceValue {rs1, rs2, rd, pc, brTarget, rs2_data}
+TraceValue {rs1, rs2, rd, pc, addr, brTarget, imm, rs1_data, rs2_data}
 
 Model noBranchPredModel [info-trace] (
     link : "models/rv32_ooo/NoBranchPredictModel.h"
@@ -139,7 +143,7 @@ Model clobberModel (
 
 Model scheduleModel (
     link : "models/rv32_ooo/Scheduler.h"
-    trace : {pc, rs1, rs2, rd}
+    trace : {pc, rs1, rs2, rd, addr}
     connectorIn :  {Xd, Dec_div, Dec_mul, Dec_br, Dec_alu, Dec_st, Dec_ld, T_wb}
     connectorOut : {Xa, Xb, T_issue}
 )
@@ -162,22 +166,21 @@ InstrGroup {
 }
 
 MicroactionMapping {
-  [ALL] :        {uA_IFetch, uA_PCGen, uA_Issue},
-  Default :      {uA_WB},
-  Arith_Ra_Rb :  {uA_Decode_alu, uA_Clobber, uA_OF_A, uA_OF_B, uA_ALU_RegUpdate_Ra_Rb, uA_WB},
-  Arith_Ra :     {uA_Decode_alu, uA_Clobber, uA_OF_A, uA_ALU_RegUpdate_Ra, uA_WB},
-  Arith_X :      {uA_Decode_alu, uA_Clobber, uA_ALU_RegUpdate, uA_WB},
-  Mul_Ra_Rb :    {uA_Decode_mul, uA_Clobber, uA_OF_A, uA_OF_B, uA_MUL0, uA_MUL1, uA_WB},
-  MulH_Ra_Rb :   {uA_Decode_mul, uA_Clobber, uA_OF_A, uA_OF_B, uA_MUL0, uA_MUL1, uA_WB},
-  Div_Ra_Rb :    {uA_Decode_div, uA_Clobber, uA_OF_A, uA_OF_B, uA_DIV, uA_WB},
-  DivU_Ra_Rb :   {uA_Decode_div, uA_Clobber, uA_OF_A, uA_OF_B, uA_DIV, uA_WB},
-  Csr_Ra :       {uA_Decode_alu, uA_Clobber, uA_OF_A, uA_CSR, uA_WB},
-  Csr_X :        {uA_Decode_alu, uA_Clobber, uA_CSR, uA_WB},
-  Store :        {uA_Decode_st, uA_OF_A, uA_OF_B, uA_Memory_W, uA_WB},
-  Load :         {uA_Decode_ld, uA_Clobber, uA_OF_A, uA_LSU, uA_Memory_R, uA_WB},
-  Branch_Ra_Rb : {uA_Decode_br, uA_OF_A, uA_OF_B, uA_ALU_Branch, uA_WB},
-  jal :          {uA_JumpDecode, uA_Clobber, uA_ALU_Jal, uA_WB},
-  jalr :         {uA_JumpDecodeReg, uA_Clobber, uA_ALU_Jalr, uA_WB}
+  [ALL] :        {uA_IFetch, uA_PCGen, uA_Issue, uA_WB},
+  Arith_Ra_Rb :  {uA_Decode_alu, uA_Clobber, uA_OF_A, uA_OF_B, uA_ALU_RegUpdate_Ra_Rb},
+  Arith_Ra :     {uA_Decode_alu, uA_Clobber, uA_OF_A, uA_ALU_RegUpdate_Ra},
+  Arith_X :      {uA_Decode_alu, uA_Clobber, uA_ALU_RegUpdate},
+  Mul_Ra_Rb :    {uA_Decode_mul, uA_Clobber, uA_OF_A, uA_OF_B, uA_MUL0, uA_MUL1},
+  MulH_Ra_Rb :   {uA_Decode_mul, uA_Clobber, uA_OF_A, uA_OF_B, uA_MUL0, uA_MUL1},
+  Div_Ra_Rb :    {uA_Decode_div, uA_Clobber, uA_OF_A, uA_OF_B, uA_DIV},
+  DivU_Ra_Rb :   {uA_Decode_div, uA_Clobber, uA_OF_A, uA_OF_B, uA_DIV},
+  Csr_Ra :       {uA_Decode_alu, uA_Clobber, uA_OF_A, uA_CSR},
+  Csr_X :        {uA_Decode_alu, uA_Clobber, uA_CSR},
+  Store :        {uA_Decode_st, uA_OF_A, uA_OF_B, uA_Memory_W},
+  Load :         {uA_Decode_ld, uA_Clobber, uA_OF_A, uA_LSU, uA_Memory_R},
+  Branch_Ra_Rb : {uA_Decode_br, uA_OF_A, uA_OF_B, uA_ALU_Branch},
+  jal :          {uA_JumpDecode, uA_Clobber, uA_ALU_Jal},
+  jalr :         {uA_JumpDecodeReg, uA_Clobber, uA_ALU_Jalr}
 }
 
 
@@ -228,11 +231,13 @@ TraceValueMapping {
   },
   Store : {
     rs1 = "$bitfield{rs1}",
-    rs2 = "$bitfield{rs2}"
+    rs2 = "$bitfield{rs2}",
+    addr = "($reg{$bitfield{rs1}} + $bitfield{imm})"
   },
   Load : {
     rs1 = "$bitfield{rs1}",
-    rd  = "$bitfield{rd}"
+    rd  = "$bitfield{rd}",
+    addr = "($reg{$bitfield{rs1}} + $bitfield{imm})"
   },
   Branch_Ra_Rb : {
     rs1 = "$bitfield{rs1}",
