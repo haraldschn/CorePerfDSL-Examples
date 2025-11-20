@@ -128,24 +128,31 @@ Pipeline RV32_OOO_pipeline (PC_stage -> IF_stage -> IS_stage -> IB_stage_OoO -> 
 /************************************* External Models *************************************/
 TraceValue {rs1, rs2, rd, pc, addr, brTarget, imm, rs1_data, rs2_data}
 
+ConnectorModel regModel (
+  link : "models/RV32_OOO/OoORegisterModel.h"
+  trace : {rs1, rs2, rd}
+  connectorIn : Xd
+  connectorOut : {Xa, Xb}
+)
+
 Model noBranchPredModel [info-trace] (
-    link : "models/rv32_ooo/NoBranchPredictModel.h"
+    link : "models/RV32_OOO/NoBranchPredictModel.h"
     connectorIn : {Pc_p, Pc_np}
     connectorOut : Pc
 )
 
 Model clobberModel (
-    link : "models/rv32_ooo/ClobberModel.h"
+    link : "models/RV32_OOO/ClobberModel.h"
     trace : {rs1, rs2, rd}
     connectorIn : {Cb_inRd, Cb_inR1, Cb_inR2}
     connectorOut : Cb_out
 )
 
 Model scheduleModel (
-    link : "models/rv32_ooo/Scheduler.h"
+    link : "models/RV32_OOO/Scheduler.h"
     trace : {pc, rs1, rs2, rd, addr}
-    connectorIn :  {Xd, Dec_div, Dec_mul, Dec_br, Dec_alu, Dec_st, Dec_ld, T_wb}
-    connectorOut : {Xa, Xb, T_issue}
+    connectorIn :  {Dec_div, Dec_mul, Dec_br, Dec_alu, Dec_st, Dec_ld, T_wb}
+    connectorOut : {T_issue}
 )
 
 /*********************************** Instruction Section ***********************************/
@@ -195,9 +202,12 @@ TraceValueMapping {
   },
   Arith_Ra : {
     rs1 = "$bitfield{rs1}",
+    rs2 = "128",
     rd  = "$bitfield{rd}"
   },
   Arith_X : {
+    rs1 = "128",
+    rs2 = "128",
     rd  = "$bitfield{rd}"
   },
   Mul_Ra_Rb : {
@@ -224,32 +234,41 @@ TraceValueMapping {
   },
   Csr_Ra : {
     rs1 = "$bitfield{rs1}",
+    rs2 = "128",
     rd  = "$bitfield{rd}"
   },
   Csr_X : {
+    rs1 = "128",
+    rs2 = "128",
     rd  = "$bitfield{rd}"
   },
   Store : {
     rs1 = "$bitfield{rs1}",
     rs2 = "$bitfield{rs2}",
+    rd  = "128",
     addr = "($reg{$bitfield{rs1}} + $bitfield{imm})"
   },
   Load : {
     rs1 = "$bitfield{rs1}",
+    rs2 = "128",
     rd  = "$bitfield{rd}",
     addr = "($reg{$bitfield{rs1}} + $bitfield{imm})"
   },
   Branch_Ra_Rb : {
     rs1 = "$bitfield{rs1}",
     rs2 = "$bitfield{rs2}",
+    rd  = "128",
     brTarget = "$resolved{$pc + (((int16_t)($bitfield{imm} << 3)) >> 3)}"
   },
   jal : {
+    rs1 = "128",
+    rs2 = "128",
     rd = "$bitfield{rd}",
     brTarget = "$resolved{$pc + (((int32_t)($bitfield{imm} << 11)) >> 11)}"
   },
   jalr : {
     rs1 = "$bitfield{rs1}",
+    rs2 = "128",
     rd  = "$bitfield{rd}",
     brTarget = "($reg{$bitfield{rs1}} + $resolved{(((int16_t)($bitfield{imm} << 4)) >> 4)}) & -2U"
   }
@@ -261,12 +280,12 @@ TraceValueMapping {
 * CorePerfModel RV32_inO (
 *  core : "RV32IMACFD"
 *  use Pipeline : RV32_inO_pipeline
-*  use ConnectorModel : {noBranchPredModel, clobberModel, scheduleModel}
+*  use ConnectorModel : {regModel, noBranchPredModel, clobberModel, scheduleModel}
 *)
 */
 
 CorePerfModel RV32_OOO (
   core : "RV32IMACFD"
   use Pipeline : RV32_OOO_pipeline
-  use ConnectorModel : {noBranchPredModel, clobberModel, scheduleModel}
+  use ConnectorModel : {regModel, noBranchPredModel, clobberModel, scheduleModel}
 )
