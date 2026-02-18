@@ -141,55 +141,55 @@ Stage {
   COM_stage [capacity:4]  (uA_Commit)
 }
 
-Pipeline RV32_4ISSUE_pipeline (IF_stage -> DEC_stage -> RN_stage -> OoO_pipeline -> COM_stage)
+Pipeline SOOMRV_pipeline (IF_stage -> DEC_stage -> RN_stage -> OoO_pipeline -> COM_stage)
 
 /************************************* External Models *************************************/
 TraceValue {rs1, rs2, rd, pc, addr, brTarget, imm, rs1_data, rs2_data}
 
 Model iCacheModel [info-trace](
-    link : "models/rv32_4issue/ICacheModel.h"
+    link : "models/soomrv/ICacheModel.h"
     trace : {pc}
     connectorIn : {Ic_in}
     connectorOut : {Ic_out}
 )
 
 Model regModel (
-  link : "models/rv32_4issue/RegisterModel.h"
+  link : "models/soomrv/RegisterModel.h"
   trace : {rs1, rs2, rd}
   connectorIn : Xd
   connectorOut : {Xa, Xb}
 )
 
 Model dynBranchPredModel [info-trace] (
-    link : "models/rv32_4issue/BranchPredictionModel.h"
+    link : "models/soomrv/BranchPredictionModel.h"
     trace : {pc, brTarget, rs1, rd, imm}
     connectorIn : {Pc_p, Pc_p_j, Pc_p_jr, Pc_c}
     connectorOut : {Pc_mp, Pc_pt}
 )
 
 Model staBranchPredModel [info-trace] (
-  link : "models/rv32_4issue/StaticBranchPredictModel.h"
+  link : "models/soomrv/StaticBranchPredictModel.h"
   trace : {pc, brTarget}
   connectorIn : {Pc_p, Pc_p_j, Pc_p_jr, Pc_c}
   connectorOut : {Pc_mp, Pc_pt}
 )
 
 Model dCacheModel [info-trace](
-    link: "models/rv32_4issue/DCacheModel.h"
+    link: "models/soomrv/DCacheModel.h"
     trace : {pc, addr}
     connectorIn : {Dc_in}
     connectorOut : {Dc_out}
 )
 
 Model fetchAligner (
-    link : "models/rv32_4issue/FetchAligner.h"
+    link : "models/soomrv/FetchAligner.h"
     trace : pc
     connectorIn : {PCGen_in}
     connectorOut : {PCGen_out}
 )
 
 Model schedModel (
-    link : "models/rv32_4issue/Scheduler.h"
+    link : "models/soomrv/Scheduler.h"
     trace : {pc, rs1, rd}
     connectorIn : {Rn_ADDI, Rn_INT, Rn_MUL, Rn_BR, Rn_JAL, Rn_CSR, Rn_DIV, EX_Alu, COM_Alu}
     connectorOut : {Issue_ALU}
@@ -321,8 +321,8 @@ TraceValueMapping {
 }
 
 /**************************************** Variants *****************************************/
-CorePerfModel RV32_4ISSUE (
+CorePerfModel SOOMRV (
   core : "RV32IMACFD"
-  use Pipeline : RV32_4ISSUE_pipeline
+  use Pipeline : SOOMRV_pipeline
   use ConnectorModel : {regModel, dynBranchPredModel, iCacheModel, dCacheModel, fetchAligner, schedModel}
 )
